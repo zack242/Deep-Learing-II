@@ -3,6 +3,7 @@ from principal_RBM_MNIST import init_RBM, entree_sortie_RBM,\
     sortie_entree_RBM, train_RBM
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
 # Définition de la classe DNN
 
 
@@ -108,7 +109,9 @@ def retropropagation(dnn, epochs, learning_rate, batch_size, X, y, display=False
     loss_history = []  # Liste vide pour stocker les valeurs de la fonction de coût
     X_train = X.copy()
     y_train = y.copy()
-    for epoch in range(epochs):
+
+    pbar = tqdm(range(epochs), desc="Retropopagation")
+    for epoch in pbar:
         # On mélange les données
         X_train, y_train = shuffle(X_train, y_train)
         loss = 0.
@@ -166,6 +169,8 @@ def retropropagation(dnn, epochs, learning_rate, batch_size, X, y, display=False
         prob_y_pred = outputs_reseau[-1]
         train_loss = cross_entropy(prob_y_pred, y_train)
         loss_history.append(train_loss)
+
+        pbar.set_postfix({'loss retropagation': train_loss})
     # Visualisation de la courbe de perte au fil des epochs
     if display:
         f = plt.figure(figsize=(10, 7))
