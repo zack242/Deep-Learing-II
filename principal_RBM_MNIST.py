@@ -1,17 +1,43 @@
 import os
 import requests
-import scipy.io as sio
-from sklearn.datasets import fetch_openml
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import expit
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.utils import shuffle
 from tqdm.auto import tqdm
 
 
 def sigmoid(x):
     return expit(x)
+
+
+def get_alphadigs():
+    if os.path.exists("data/alphadigs.mat"):
+        return loadmat("data/alphadigs.mat")
+
+    alphadigs_url = "https://cs.nyu.edu/~roweis/data/binaryalphadigs.mat"
+    r = requests.get(alphadigs_url, allow_redirects=True)
+
+    with open("data/alphadigs.mat", "wb") as f:
+        f.write(r.content)
+
+    return loadmat("data/alphadigs.mat")
+
+
+def lire_alpha_digit(digits_list):
+    # Charger les données
+    dataset = get_alphadigs()
+
+    # Filtrages des données selon la liste de chiffres voulus
+    digit2idx = {}
+    for i, digit in enumerate(dataset["classlabels"][0]):
+        digit2idx[digit[0]] = i
+
+    idxs = []
+    for digit in digits_list:
+        idxs.append(digit2idx[digit])
+
+    # Adaptation au format (n, p), chaque colonne designe un pixel et chaque ligne une image
+    return np.stack(np.concatenate(dataset["dat"][idxs])).reshape(-1, 20 * 16)
 
 
 class RBM:
@@ -21,11 +47,11 @@ class RBM:
         -> p: dimension input (v)
         -> q: dimension output (h)
         -> E(v, h) = - sum_p(a_i*v_i) - sum_q(b_j*h_j) - sum_p(W_ij*v_i*h_j)
-    Cette classe implemente des méthodes initialisation et entrainement du RBM. 
+    Cette classe implemente des méthodes initialisation et entrainement du RBM.
     """
 
     def __init__(self, p, q):
-        """ Constructeur de la classe """
+        """Constructeur de la classe"""
         self.p = p
         self.q = q
         # biais des unités d’entrée) -> dim (1xp)
@@ -37,7 +63,7 @@ class RBM:
 
 
 def init_RBM(p, q):
-    """ Initialize et retourne un RBM"""
+    """Initialize et retourne un RBM"""
     return RBM(p, q)
 
 
@@ -45,7 +71,7 @@ def entree_sortie_RBM(rbm_unit, data):
     """
     Sort data_h de dimension (nxq)
     """
-    p_h_donne_v = sigmoid(data@rbm_unit.W + rbm_unit.b)
+    p_h_donne_v = sigmoid(data @ rbm_unit.W + rbm_unit.b)
     # return bernoulli distribution for the sampled probabilities
     data_h = np.random.binomial(1, p_h_donne_v, size=None)
     # Nous retournons les probabilités et les données de sortie
@@ -57,7 +83,7 @@ def sortie_entree_RBM(rbm_unit, data_h):
     """
     Sort entree data reconstruit de dimension (nxp)
     """
-    p_v_donne_h = sigmoid(data_h@rbm_unit.W.T + rbm_unit.a)
+    p_v_donne_h = sigmoid(data_h @ rbm_unit.W.T + rbm_unit.a)
     # return bernoulli distribution for the sampled probabilities
     reconstructed_data = np.random.binomial(1, p_v_donne_h, size=None)
     # Nous retournons les probabilités et les données de sortie
@@ -78,17 +104,16 @@ def train_RBM(rbm_unit, X, epochs, learning_rate, batch_size, cd_k=1, verbose=Fa
         # shuffle data
         np.random.shuffle(X_train)
         # Initialization du loss et taille des données
-        loss = 0.
+        loss = 0.0
         n = X_train.shape[0]
         # Raise erreur si la taille du batch est > que la quantité de données
         if batch_size > n:
-            raise ValueError(
-                'Taille du batch est > que la quantité de données ! ')
+            raise ValueError("Taille du batch est > que la quantité de données ! ")
         # Iteration des batches
         for batch_start in range(0, n - batch_size, batch_size):
             # On initialise l'état initial en tant que les données
-            v_0 = X_train[batch_start:batch_start + batch_size, :]
-            v_k = X_train[batch_start:batch_start + batch_size, :]
+            v_0 = X_train[batch_start : batch_start + batch_size, :]
+            v_k = X_train[batch_start : batch_start + batch_size, :]
             # taille batch
             taille_batch = v_0.shape[0]
             # On fait le forward pass
@@ -105,12 +130,9 @@ def train_RBM(rbm_unit, X, epochs, learning_rate, batch_size, cd_k=1, verbose=Fa
             # à jour
             ph_k, _ = entree_sortie_RBM(rbm_unit, v_k)
             # Mise à jour des parametres
-            rbm_unit.W += (learning_rate/taille_batch) * \
-                (v_0.T @ ph_0 - v_k.T @ ph_k)
-            rbm_unit.a += (learning_rate/taille_batch) * \
-                np.sum(v_0 - v_k, axis=0)
-            rbm_unit.b += (learning_rate/taille_batch) * \
-                np.sum(ph_0 - ph_k, axis=0)
+            rbm_unit.W += (learning_rate / taille_batch) * (v_0.T @ ph_0 - v_k.T @ ph_k)
+            rbm_unit.a += (learning_rate / taille_batch) * np.sum(v_0 - v_k, axis=0)
+            rbm_unit.b += (learning_rate / taille_batch) * np.sum(ph_0 - ph_k, axis=0)
         # Calculer l'erreur de reconstruction
         v_0 = X_train
         v_k = X_train
@@ -119,20 +141,20 @@ def train_RBM(rbm_unit, X, epochs, learning_rate, batch_size, cd_k=1, verbose=Fa
             _, h_k = entree_sortie_RBM(rbm_unit, v_k)
             _, v_k = sortie_entree_RBM(rbm_unit, h_k)
 
-        loss = np.mean((v_k - v_0)**2)
+        loss = np.mean((v_k - v_0) ** 2)
         loss_history.append(loss)
 
-        pbar.set_postfix({'loss pretraining': loss})
+        pbar.set_postfix({"loss pretraining": loss})
 
         if verbose:
             if epoch % 10 == 0:
-                print(f'Epoch: {epoch} -- Erreur de reconstruction: {loss}')
+                print(f"Epoch: {epoch} -- Erreur de reconstruction: {loss}")
     return rbm_unit
 
 
 def generer_image_RBM(rbm_unit, nbr_iterations_gibbs, nbr_images, image_shape=(20, 16)):
     """
-    Genere et affiche des images à partir des signaux random avec un RBM appris. 
+    Genere et affiche des images à partir des signaux random avec un RBM appris.
     """
     for image_count in range(nbr_images):
         # Initialize image random
@@ -148,5 +170,5 @@ def generer_image_RBM(rbm_unit, nbr_iterations_gibbs, nbr_images, image_shape=(2
         image_arr = v_k.reshape(image_shape)
         # Afficher Image
         # plt.subplot(image_count)
-        plt.imshow(image_arr, cmap='Greys',  interpolation='nearest')
+        plt.imshow(image_arr, cmap="Greys", interpolation="nearest")
         plt.show()
