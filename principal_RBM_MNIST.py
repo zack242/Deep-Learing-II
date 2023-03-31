@@ -1,16 +1,19 @@
 import os
 import requests
-import numpy as np
+from scipy.io import loadmat
 import matplotlib.pyplot as plt
-from scipy.special import expit
-from tqdm.auto import tqdm
+import numpy as np
+from RBM import RBM
 
 
 def sigmoid(x):
-    return expit(x)
+    """Computes the sigmoid activation function."""
+    return 1 / (1 + np.exp(-x))
 
 
+# Function for loading the alphadigits dataset
 def get_alphadigs():
+    """Loads the alphadigits dataset from disk or downloads if not found."""
     if os.path.exists("data/alphadigs.mat"):
         return loadmat("data/alphadigs.mat")
 
@@ -23,43 +26,22 @@ def get_alphadigs():
     return loadmat("data/alphadigs.mat")
 
 
+# Function for reading selected alphadigits
 def lire_alpha_digit(digits_list):
-    # Charger les données
+    """Reads the selected alphadigits from the dataset."""
+    # Load the dataset
     dataset = get_alphadigs()
 
-    # Filtrages des données selon la liste de chiffres voulus
+    # Filter the data according to the desired digits list
     digit2idx = {}
     for i, digit in enumerate(dataset["classlabels"][0]):
         digit2idx[digit[0]] = i
-
     idxs = []
     for digit in digits_list:
         idxs.append(digit2idx[digit])
 
-    # Adaptation au format (n, p), chaque colonne designe un pixel et chaque ligne une image
+    # Reshape the data into (n, p) format, where each row is an image and each column represents a pixel
     return np.stack(np.concatenate(dataset["dat"][idxs])).reshape(-1, 20 * 16)
-
-
-class RBM:
-    """
-    Restricted Boltzman Machine class
-    Implementation d'un RBM en suivant les memes notations qu'en cours:
-        -> p: dimension input (v)
-        -> q: dimension output (h)
-        -> E(v, h) = - sum_p(a_i*v_i) - sum_q(b_j*h_j) - sum_p(W_ij*v_i*h_j)
-    Cette classe implemente des méthodes initialisation et entrainement du RBM.
-    """
-
-    def __init__(self, p, q):
-        """Constructeur de la classe"""
-        self.p = p
-        self.q = q
-        # biais des unités d’entrée) -> dim (1xp)
-        self.a = np.zeros((1, self.p))
-        # biais des unités de sortie -> dim (1xq)
-        self.b = np.zeros((1, self.q))
-        # initialisés aléatoirement suivant une loi normale centrée, de variance égale à 0.01
-        self.W = np.random.normal(loc=0, scale=0.1, size=(self.p, self.q))
 
 
 def init_RBM(p, q):
@@ -67,108 +49,78 @@ def init_RBM(p, q):
     return RBM(p, q)
 
 
-def entree_sortie_RBM(rbm_unit, data):
-    """
-    Sort data_h de dimension (nxq)
-    """
-    p_h_donne_v = sigmoid(data @ rbm_unit.W + rbm_unit.b)
-    # return bernoulli distribution for the sampled probabilities
-    data_h = np.random.binomial(1, p_h_donne_v, size=None)
-    # Nous retournons les probabilités et les données de sortie
-    # (n, q), (n, q)
-    return p_h_donne_v, data_h
+def entree_sortie_RBM(rbm, x):
+    p_h_v = sigmoid(np.dot(x, rbm.W) + rbm.b)
+    data_h = np.random.binomial(1, p_h_v, size=None)
+    return p_h_v, data_h
 
 
-def sortie_entree_RBM(rbm_unit, data_h):
-    """
-    Sort entree data reconstruit de dimension (nxp)
-    """
-    p_v_donne_h = sigmoid(data_h @ rbm_unit.W.T + rbm_unit.a)
-    # return bernoulli distribution for the sampled probabilities
-    reconstructed_data = np.random.binomial(1, p_v_donne_h, size=None)
-    # Nous retournons les probabilités et les données de sortie
-    # (n, p), (n, p)
-    return p_v_donne_h, reconstructed_data
+def sortie_entree_RBM(rbm, y):  # (n * q) -> (n * p)
+    p_v_h = sigmoid(np.dot(y, rbm.W.T) + rbm.a)
+    reconstructed_data = np.random.binomial(1, p_v_h, size=None)
+    return p_v_h, reconstructed_data
 
 
-def train_RBM(rbm_unit, X, epochs, learning_rate, batch_size, cd_k=1, verbose=False):
+def train_RBM(rbm, data, epochs, learning_rate, batch_size, cd_k=1, verbose=False):
     """
-    Entraine un RBM et retourne le même RBM entrainé
+    Trains an RBM using contrastive divergence.
     """
-    # Implementer un Constrative Divergence-1
     loss_history = []
-    # On crée une copie pour ne pas modifier le vecteur originel
-    X_train = X.copy()
-    pbar = tqdm(range(epochs), desc="Training RMB")
-    for epoch in pbar:
-        # shuffle data
-        np.random.shuffle(X_train)
-        # Initialization du loss et taille des données
+    data_train = data.copy()
+
+    for epoch in range(epochs):
+        np.random.shuffle(data_train)
         loss = 0.0
-        n = X_train.shape[0]
-        # Raise erreur si la taille du batch est > que la quantité de données
-        if batch_size > n:
-            raise ValueError("Taille du batch est > que la quantité de données ! ")
-        # Iteration des batches
-        for batch_start in range(0, n - batch_size, batch_size):
-            # On initialise l'état initial en tant que les données
-            v_0 = X_train[batch_start : batch_start + batch_size, :]
-            v_k = X_train[batch_start : batch_start + batch_size, :]
-            # taille batch
-            taille_batch = v_0.shape[0]
-            # On fait le forward pass
-            ph_0, h_0 = entree_sortie_RBM(rbm_unit, v_0)
-            # Appliquons la Contrastive Divergence
-            # En pratique nous allons appliquer un CD-1, mais
-            # ci-dessous nous écrivons le code pour un CD-K
-            # quelconque
+        num_samples = data_train.shape[0]
+
+        for start in range(0, num_samples - batch_size, batch_size):
+            v_0 = data_train[start : start + batch_size, :]
+            v_k = data_train[start : start + batch_size, :]
+            batch_size = v_0.shape[0]
+            p_h_0, h_0 = entree_sortie_RBM(rbm, v_0)
+
             for k in range(cd_k):
-                # Sample h
-                _, h_k = entree_sortie_RBM(rbm_unit, v_k)
-                _, v_k = sortie_entree_RBM(rbm_unit, h_k)
-            # Prenons la probabilité de chaque composante de la sortie pour des mises
-            # à jour
-            ph_k, _ = entree_sortie_RBM(rbm_unit, v_k)
-            # Mise à jour des parametres
-            rbm_unit.W += (learning_rate / taille_batch) * (v_0.T @ ph_0 - v_k.T @ ph_k)
-            rbm_unit.a += (learning_rate / taille_batch) * np.sum(v_0 - v_k, axis=0)
-            rbm_unit.b += (learning_rate / taille_batch) * np.sum(ph_0 - ph_k, axis=0)
-        # Calculer l'erreur de reconstruction
-        v_0 = X_train
-        v_k = X_train
+                _, h_k = entree_sortie_RBM(rbm, v_k)
+                _, v_k = sortie_entree_RBM(rbm, h_k)
+
+            p_h_k, _ = entree_sortie_RBM(rbm, v_k)
+            rbm.W += (learning_rate / batch_size) * (
+                np.dot(v_0.T, p_h_0) - np.dot(v_k.T, p_h_k)
+            )
+            rbm.a += (learning_rate / batch_size) * np.sum(v_0 - v_k, axis=0)
+            rbm.b += (learning_rate / batch_size) * np.sum(p_h_0 - p_h_k, axis=0)
+
+        v_0 = data_train
+        v_k = data_train
+
         for k in range(cd_k):
-            # Sample h
-            _, h_k = entree_sortie_RBM(rbm_unit, v_k)
-            _, v_k = sortie_entree_RBM(rbm_unit, h_k)
+            _, h_k = entree_sortie_RBM(rbm, v_k)
+            _, v_k = sortie_entree_RBM(rbm, h_k)
 
         loss = np.mean((v_k - v_0) ** 2)
         loss_history.append(loss)
 
-        pbar.set_postfix({"loss pretraining": loss})
-
         if verbose:
             if epoch % 10 == 0:
-                print(f"Epoch: {epoch} -- Erreur de reconstruction: {loss}")
-    return rbm_unit
+                print(f"Epoch: {epoch} -- Reconstruction error: {loss}")
+
+    return rbm
 
 
-def generer_image_RBM(rbm_unit, nbr_iterations_gibbs, nbr_images, image_shape=(20, 16)):
+def generer_image_RBM(rbm, nb_iter, nb_images):
     """
-    Genere et affiche des images à partir des signaux random avec un RBM appris.
+    Generates and displays images from random signals using a trained RBM.
     """
-    for image_count in range(nbr_images):
-        # Initialize image random
-        v_0 = np.random.rand(1, rbm_unit.p)
-        v_k = v_0
-        # échantillonnage de gibbs
-        for i in range(nbr_iterations_gibbs):
-            # Sample h
-            _, h_k = entree_sortie_RBM(rbm_unit, v_k)
-            _, v_k = sortie_entree_RBM(rbm_unit, h_k)
+    p = rbm.a.shape[1]
+    q = len(rbm.b)
+    for i in range(nb_images):
+        image = np.random.uniform(0, 1, (1, p))
+        for j in range(nb_iter):
+            prob_h_given_v, _ = entree_sortie_RBM(rbm, image)
+            h = (prob_h_given_v > np.random.rand(q)) * 1.0
+            prob_v_given_h, _ = sortie_entree_RBM(rbm, h)
+            image = (prob_v_given_h > np.random.rand(p)) * 1.0
 
-        # Redimensionner image
-        image_arr = v_k.reshape(image_shape)
-        # Afficher Image
-        # plt.subplot(image_count)
-        plt.imshow(image_arr, cmap="Greys", interpolation="nearest")
+        image = np.reshape(image, (20, 16))
+        plt.imshow(image, cmap="gray")
         plt.show()
