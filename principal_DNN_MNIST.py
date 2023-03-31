@@ -2,7 +2,6 @@ from sklearn.utils import shuffle
 from principal_RBM_MNIST import (
     init_RBM,
     entree_sortie_RBM,
-    sortie_entree_RBM,
     train_RBM,
 )
 import numpy as np
@@ -11,10 +10,6 @@ from tqdm.auto import tqdm
 
 
 class DNN:
-    """
-    Deep Neural Network
-    """
-
     def __init__(self, p, hidden_layers_units, nbr_classes):
         self.p = p
         self.nbr_classes = nbr_classes
@@ -36,17 +31,17 @@ def init_DNN(p, hidden_layers_units, nbr_classes):
 
 # Pretrain the DNN using the RBM approach
 def pretrain_DNN(dnn, X, epochs, learning_rate, batch_size):
-    v = X.copy()
+    X_copy = X.copy()
     for layer in range(dnn.nbr_hidden_layers):
         dnn.DBN[layer] = train_RBM(
             dnn.DBN[layer],
-            v,
+            X_copy,
             epochs=epochs,
             learning_rate=learning_rate,
             batch_size=batch_size,
             cd_k=1,
         )
-        _, v = entree_sortie_RBM(dnn.DBN[layer], v)
+        _, v = entree_sortie_RBM(dnn.DBN[layer], X_copy)
     return dnn
 
 
@@ -109,6 +104,7 @@ def retropropagation(dnn, epochs, learning_rate, batch_size, X, y, display=False
                 grads[f"db_{l}"] = np.mean(c_l, axis=0)
             dnn.classification_layer.W -= learning_rate * grads["dW_softmax"]
             dnn.classification_layer.b -= learning_rate * grads["db_softmax"]
+
             for l in range(dnn.nbr_hidden_layers - 1, -1, -1):
                 dnn.DBN[l].W -= learning_rate * grads[f"dW_{l}"]
                 dnn.DBN[l].b -= learning_rate * grads[f"db_{l}"]
